@@ -1,0 +1,11 @@
+# Node modules
+node_modules/
+
+# WhatsApp-web.js local auth storage
+.wwebjs_auth/
+
+# Environment variable files
+.env
+
+# Logs
+npm-debug.log* 

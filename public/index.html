@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp Web Sender</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: linear-gradient(135deg, #74abe2, #5563de);
+        font-family: "Roboto", sans-serif;
+      }
+
+      .container {
+        background: #fff;
+        padding: 2rem;
+        border-radius: 10px;
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        width: 100%;
+        max-width: 400px;
+      }
+
+      h1,
+      h2 {
+        text-align: center;
+        color: #333;
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-weight: 500;
+        color: #444;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 1rem;
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 100px;
+      }
+
+      button {
+        width: 100%;
+        padding: 0.75rem;
+        background: #5563de;
+        color: white;
+        font-size: 1rem;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.3s ease;
+      }
+
+      button:hover {
+        background: #4350b5;
+      }
+
+      #status {
+        margin-top: 1rem;
+        text-align: center;
+        font-weight: 500;
+      }
+
+      .error {
+        color: #dc3545;
+      }
+
+      .success {
+        color: #28a745;
+      }
+    </style>
+  </head>
+
+  <body>
+    <main class="container">
+      <!-- QR Code Authentication Section -->
+      <div id="qrSection" style="text-align: center; margin-bottom: 1rem">
+        <h2>Authenticate</h2>
+        <div
+          id="qrImage"
+          style="width: 200px; height: 200px; display: inline-block"
+        ></div>
+        <p id="qrStatus">Waiting for QR code...</p>
+        <button
+          id="regenerateQR"
+          style="
+            margin-top: 0.5rem;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            background: #f0ad4e;
+            color: #fff;
+            cursor: pointer;
+          "
+        >
+          Regenerate QR Code
+        </button>
+      </div>
+      <h1>WhatsApp Web Sender</h1>
+      <button
+        type="button"
+        id="viewTasks"
+        style="
+          display: block;
+          width: 100%;
+          padding: 0.75rem;
+          margin: 1rem 0;
+          background: #28a745;
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+        "
+      >
+        View Scheduled Tasks
+      </button>
+      <!-- Inline Tasks List -->
+      <div id="tasksSection" style="display: none; margin-bottom: 1rem">
+        <h2>Scheduled Tasks</h2>
+        <select
+          id="tasksSelect"
+          multiple
+          style="width: 100%; height: 150px; margin-bottom: 0.5rem"
+        ></select>
+        <button
+          id="deleteTasks"
+          type="button"
+          style="
+            display: block;
+            width: 100%;
+            padding: 0.5rem;
+            background: #dc3545;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+          "
+        >
+          Delete Selected
+        </button>
+      </div>
+      <form id="messageForm" novalidate>
+        <h2>Send a Message</h2>
+
+        <label for="phone">Phone Number</label>
+        <input
+          type="tel"
+          id="phone"
+          placeholder="+1234567890"
+          pattern="^\+?[0-9]{10,15}$"
+          required
+        />
+
+        <label for="message">Message</label>
+        <textarea
+          id="message"
+          placeholder="Type your message here..."
+          required
+        ></textarea>
+
+        <label for="media">Media (optional):</label>
+        <input type="file" id="media" accept="image/*" />
+        <label for="scheduleDate">Schedule Date (optional):</label>
+        <input type="date" id="scheduleDate" />
+        <label for="scheduleTime">Schedule Time (optional):</label>
+        <input type="time" id="scheduleTime" />
+        <label for="recurrence">Recurrence:</label>
+        <select id="recurrence">
+          <option value="">None</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+
+        <button type="submit">Send</button>
+
+        <div id="status"></div>
+      </form>
+    </main>
+
+    <script>
+      // Fetch and display QR code SVG for authentication
+      const qrSection = document.getElementById("qrSection");
+      const qrImg = document.getElementById("qrImage");
+      const qrStatus = document.getElementById("qrStatus");
+      async function loadQR() {
+        try {
+          const res = await fetch("/qr");
+          if (res.status === 200) {
+            const data = await res.json();
+            if (data.svg) {
+              qrImg.innerHTML = data.svg;
+              qrStatus.textContent = "QR code ready. Scan with WhatsApp";
+            } else if (data.ready) {
+              qrStatus.textContent = "✅ Authenticated. You can send messages.";
+              // hide QR section once authenticated
+              qrSection.style.display = "none";
+            }
+          } else {
+            // still waiting for QR
+            qrStatus.textContent = "Waiting for QR code...";
+          }
+        } catch (err) {
+          console.error("Failed to fetch QR:", err);
+          qrStatus.textContent = "Error loading QR code";
+        }
+      }
+      loadQR();
+      setInterval(loadQR, 3000);
+
+      // View Tasks button handler: fetch and render tasks in dropdown
+      const tasksBtn = document.getElementById("viewTasks");
+      const tasksSection = document.getElementById("tasksSection");
+      const tasksSelect = document.getElementById("tasksSelect");
+      tasksBtn.addEventListener("click", async () => {
+        try {
+          const res = await fetch("/api/tasks");
+          const data = await res.json();
+          tasksSelect.innerHTML = "";
+          if (data.length === 0) {
+            const opt = document.createElement("option");
+            opt.disabled = true;
+            opt.textContent = "No scheduled tasks.";
+            tasksSelect.appendChild(opt);
+          } else {
+            data.forEach((t) => {
+              const opt = document.createElement("option");
+              opt.value = t.id;
+              opt.textContent = `[${t.recurrence}] To ${t.phone.replace(
+                "@c.us",
+                ""
+              )} at ${t.scheduleAt}`;
+              tasksSelect.appendChild(opt);
+            });
+          }
+          tasksSection.style.display = "block";
+        } catch (err) {
+          console.error("Failed to load tasks:", err);
+        }
+      });
+
+      // Delete Selected tasks handler
+      const deleteBtn = document.getElementById("deleteTasks");
+      deleteBtn.addEventListener("click", async () => {
+        const selected = Array.from(tasksSelect.selectedOptions).map(
+          (o) => o.value
+        );
+        if (!selected.length) return;
+        try {
+          await fetch("/api/tasks/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selected }),
+          });
+          // Refresh dropdown
+          tasksBtn.click();
+        } catch (err) {
+          console.error("Failed to delete tasks:", err);
+        }
+      });
+
+      // Regenerate QR button handler
+      const regenBtn = document.getElementById("regenerateQR");
+      regenBtn.addEventListener("click", async () => {
+        qrStatus.textContent = "Regenerating QR code...";
+        qrImg.innerHTML = "";
+        try {
+          await fetch("/logout", { method: "POST" });
+          setTimeout(loadQR, 1000);
+        } catch (err) {
+          console.error("Failed to regenerate QR:", err);
+          qrStatus.textContent = "Error regenerating QR";
+        }
+      });
+
+      const form = document.getElementById("messageForm");
+      const statusDiv = document.getElementById("status");
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        statusDiv.textContent = "Processing...";
+        statusDiv.classList.remove("error");
+        const phone = document.getElementById("phone").value;
+        const text = document.getElementById("message").value;
+        const scheduleDate = document.getElementById("scheduleDate").value;
+        const scheduleTime = document.getElementById("scheduleTime").value;
+        const recurrence = document.getElementById("recurrence").value;
+        const mediaInput = document.getElementById("media");
+        const formData = new FormData();
+        formData.append("phone", phone);
+        formData.append("text", text);
+        if (scheduleDate) formData.append("scheduleDate", scheduleDate);
+        if (scheduleTime) formData.append("scheduleTime", scheduleTime);
+        if (recurrence) formData.append("recurrence", recurrence);
+        if (mediaInput.files.length > 0)
+          formData.append("media", mediaInput.files[0]);
+        try {
+          const res = await fetch("/send", { method: "POST", body: formData });
+          const json = await res.json();
+          if (res.ok) {
+            if (json.status === "scheduled") {
+              const displayDate = scheduleDate
+                ? scheduleDate
+                : new Date().toLocaleDateString();
+              const displayTime = scheduleTime
+                ? scheduleTime
+                : new Date().toLocaleTimeString();
+              statusDiv.textContent = `Scheduled for ${displayDate} ${displayTime}`;
+            } else {
+              statusDiv.textContent = `Sent successfully! ID: ${json.id}`;
+            }
+            // Clear inputs to avoid re-sending previous media or schedule
+            mediaInput.value = "";
+            document.getElementById("scheduleDate").value = "";
+            document.getElementById("scheduleTime").value = "";
+            document.getElementById("recurrence").value = "";
+          } else {
+            statusDiv.classList.add("error");
+            statusDiv.textContent = `Error: ${json.error || res.statusText}`;
+          }
+        } catch (err) {
+          statusDiv.classList.add("error");
+          statusDiv.textContent = `Error: ${err}`;
+        }
+      });
+    </script>
+  </body>
+</html>
