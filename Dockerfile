@@ -1,31 +1,22 @@
-# Build stage
-FROM node:18-alpine AS build
+# Single-stage build for better Render compatibility
+FROM node:16-alpine
 
-# Set up workdir and copy package files
-WORKDIR /app
-COPY package*.json ./
-
-# Install dependencies for build
-RUN npm ci --omit=dev
-
-# Copy source files
-COPY . .
-
-# Final production stage
-FROM node:18-alpine
-
-# Install Chromium and minimal dependencies
-RUN apk add --no-cache \
+# Install build dependencies and Chromium
+RUN apk add --no-cache --virtual .build-deps \
+    python3 \
+    make \
+    g++ \
+    && apk add --no-cache \
     chromium \
     nss \
     freetype \
     harfbuzz \
     ca-certificates \
     ttf-freefont \
-    # Use nano instead of full-size editors
-    nano \
-    # Add tzdata for timezone handling
-    tzdata
+    tzdata \
+    wget \
+    # Needed for puppeteer
+    dumb-init
 
 # Set up browser environment with memory optimizations
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
@@ -35,13 +26,25 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
     # Browser flags for low resource usage
     PUPPETEER_ARGS="--disable-dev-shm-usage --disable-gpu --disable-software-rasterizer --disable-extensions --no-sandbox --disable-setuid-sandbox --no-zygote --single-process --disable-features=site-per-process"
 
-# Create workdir and uploads directory
+# Create workdir
 WORKDIR /app
-RUN mkdir -p uploads
 
-# Copy from build stage
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app .
+# Copy package.json and package-lock.json first for better caching
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install --production=false \
+    && npm install puppeteer-extra puppeteer-extra-plugin-stealth \
+    # Clean up build dependencies to reduce image size
+    && apk del .build-deps
+
+# Copy application files
+COPY . .
+
+# Create uploads directory with proper permissions
+RUN mkdir -p uploads \
+    && chmod -R 777 uploads \
+    && chmod -R 777 /app
 
 # Add support for health checks
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
@@ -49,6 +52,9 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 
 # Expose port
 EXPOSE 3000
+
+# Use dumb-init to properly handle signals
+ENTRYPOINT ["dumb-init", "--"]
 
 # Start the app with memory limit flag
 CMD ["node", "--max-old-space-size=256", "sender.js"]
