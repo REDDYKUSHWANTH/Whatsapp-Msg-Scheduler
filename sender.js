@@ -14,6 +14,72 @@ const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 
+// Define all MongoDB schemas
+// User schema/model for authentication
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please use a valid email address']
+  },
+  password: {
+    type: String,
+    required: [true, 'Password is required'],
+    minlength: [6, 'Password must be at least 6 characters']
+  },
+  name: {
+    type: String,
+    trim: true
+  },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  lastLogin: Date
+}, {
+  timestamps: true
+});
+
+// Create the User model
+const User = mongoose.model("User", userSchema);
+
+// Task schema/model
+const taskSchema = new mongoose.Schema({
+  phone: String,
+  name: { type: String, default: null },
+  text: String,
+  mediaPaths: { type: [String], default: [] },
+  scheduleDate: String,
+  scheduleTime: String,
+  recurrence: {
+    type: String,
+    enum: ["once", "hourly", "daily", "weekly", "monthly", "yearly"],
+    default: "once",
+  },
+  scheduleAt: String,
+  createdAt: { type: Date, default: Date.now },
+  userEmail: String,
+  paused: { type: Boolean, default: false },
+});
+const Task = mongoose.model("Task", taskSchema);
+
+// Receipt schema/model for delivery/read receipts
+const receiptSchema = new mongoose.Schema({
+  messageId: { type: String, unique: true },
+  task: { type: mongoose.Schema.Types.ObjectId, ref: "Task" },
+  ack: Number,
+  timestamp: Date,
+});
+const Receipt = mongoose.model("Receipt", receiptSchema);
+
 // Puppeteer-extra for improved browser automation
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -186,28 +252,55 @@ async function findChromeExecutablePath() {
   return null;
 }
 
-// Configure browser arguments for better compatibility
-const browserArgs = [
-  "--no-sandbox",
-  "--disable-setuid-sandbox",
-  "--disable-dev-shm-usage",
-  "--disable-accelerated-2d-canvas",
-  "--no-first-run",
-  "--disable-extensions",
-  "--ignore-certificate-errors",
-  "--ignore-certificate-errors-spki-list",
-  "--disable-features=IsolateOrigins,site-per-process",
-  "--user-data-dir=" + path.join(__dirname, '.browser-data')
-];
+// Parse browser arguments from environment variables or use defaults
+const parseBrowserArgs = () => {
+  const defaultArgs = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-accelerated-2d-canvas",
+    "--no-first-run",
+    "--disable-extensions",
+    "--ignore-certificate-errors",
+    "--ignore-certificate-errors-spki-list",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--user-data-dir=" + path.join(__dirname, '.browser-data')
+  ];
 
-// OS-specific optimizations
-if (isWin) {
-  browserArgs.push("--disable-features=TranslateUI");
-  browserArgs.push("--disable-background-networking");
-} else if (isLinux) {
-  browserArgs.push("--no-zygote");
-  browserArgs.push("--single-process");
-}
+  // OS-specific optimizations
+  if (isWin) {
+    defaultArgs.push("--disable-features=TranslateUI");
+    defaultArgs.push("--disable-background-networking");
+  } else if (isLinux) {
+    defaultArgs.push("--no-zygote");
+    defaultArgs.push("--single-process");
+  }
+  
+  // Get args from environment variable if set
+  if (process.env.PUPPETEER_ARGS) {
+    try {
+      const envArgs = process.env.PUPPETEER_ARGS.split(' ');
+      logInfo("Using browser args from environment:", envArgs);
+      // Ensure --no-sandbox is included for container environments
+      if (!envArgs.includes('--no-sandbox')) {
+        envArgs.push('--no-sandbox');
+      }
+      return envArgs;
+    } catch (err) {
+      logError("Error parsing PUPPETEER_ARGS:", err);
+    }
+  }
+  
+  // Always ensure --no-sandbox is included for container environments
+  if (!defaultArgs.includes('--no-sandbox')) {
+    defaultArgs.push('--no-sandbox');
+  }
+  
+  return defaultArgs;
+};
+
+// Get browser arguments
+const browserArgs = parseBrowserArgs();
 
 // Initialize state variables
 let currentQR = null;
@@ -236,26 +329,77 @@ async function createCustomPuppeteerBrowser() {
   }
 }
 
-// Initialize the WhatsApp Web client
-async function setupWhatsAppClient() {
+// Initialize WhatsApp client function will be replaced with a fixed version below
+
+// Create a global client variable
+let client;
+
+// Create custom puppeteer browser instance for WAWebJS
+async function createCustomPuppeteerBrowser() {
   try {
-    // Create the WhatsApp client with custom puppeteer implementation
-    const client = new Client({
-      authStrategy: new LocalAuth({ 
-        dataPath: path.join(__dirname, '.wwebjs_auth'),
+    const executablePath = await findChromeExecutablePath();
+    
+    // Log launch configuration for debugging
+    logInfo('Launching browser with configuration:');
+    logInfo('- Executable path:', executablePath || 'Default');
+    logInfo('- Arguments:', browserArgs);
+    
+    // Create data directories with proper permissions if they don't exist
+    const dataDir = path.join(__dirname, '.browser-data');
+    const authDir = path.join(__dirname, '.wwebjs_auth');
+    
+    for (const dir of [dataDir, authDir]) {
+      if (!fs.existsSync(dir)) {
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+          logInfo(`Created directory: ${dir}`);
+        } catch (err) {
+          logError(`Failed to create directory ${dir}:`, err);
+        }
+      }
+    }
+    
+    // Launch browser with optimized configuration
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: browserArgs,
+      executablePath,
+      ignoreHTTPSErrors: true,
+      defaultViewport: { width: 1280, height: 800 },
+      timeout: 120000,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+      dumpio: process.env.NODE_ENV !== 'production', // Log browser console in dev mode
+    });
+    
+    // Log successful launch
+    const version = await browser.version();
+    logInfo('Browser launched successfully:', version);
+    
+    return browser;
+  } catch (error) {
+    logError('Error creating custom browser:', error);
+    throw error;
+  }
+}
+        dataPath: authPath,
         clientId: 'whatsapp-scheduler'
       }),
       puppeteer: {
         // Use our custom browser instance
         browser: await createCustomPuppeteerBrowser(),
+        // Explicitly set these properties for more reliability
+        browserArgs: browserArgs,
+        headless: true,
       },
       webVersionCache: { type: 'local' },
       restartOnAuthFail: true,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.67 Safari/537.36',
     });
 
     // Set up event handlers
-    client.on("qr", async (qr) => {
+    newClient.on("qr", async (qr) => {
       try {
         currentQR = await qrcode.toString(qr, { type: "svg" });
         logInfo("QR Code generated - scan to connect WhatsApp");
@@ -265,20 +409,20 @@ async function setupWhatsAppClient() {
       }
     });
 
-    client.on("ready", () => {
+    newClient.on("ready", () => {
       logInfo("WhatsApp is ready and connected!");
       currentQR = null;
       isReady = true;
       initRetries = 0;
     });
 
-    client.on("auth_failure", (msg) => {
+    newClient.on("auth_failure", (msg) => {
       logError("WhatsApp authentication failed:", msg);
       currentQR = null;
       isReady = false;
     });
 
-    client.on("disconnected", (reason) => {
+    newClient.on("disconnected", (reason) => {
       logInfo("WhatsApp disconnected. Reason:", reason);
       isReady = false;
       
@@ -287,7 +431,7 @@ async function setupWhatsAppClient() {
         logInfo(`Will attempt reconnection in ${delay/1000} seconds (${initRetries+1}/${MAX_RETRIES})...`);
         
         setTimeout(() => {
-          initClient(client);
+          initClient(newClient);
         }, delay);
       } else {
         logError("Maximum reconnection attempts reached. Please restart the server.");
@@ -295,12 +439,12 @@ async function setupWhatsAppClient() {
     });
 
     // Add error logging
-    client.on("message_create", (msg) => {
-      logDebug("New message created:", msg.body.substring(0, 20) + "...");
+    newClient.on("message_create", (msg) => {
+      logDebug("New message created:", msg.body?.substring(0, 20) + "...");
     });
     
     // Listen for delivery/read acknowledgments
-    client.on("message_ack", async (msg, ack) => {
+    newClient.on("message_ack", async (msg, ack) => {
       try {
         const messageId = msg.id._serialized;
         await Receipt.findOneAndUpdate(
@@ -313,24 +457,15 @@ async function setupWhatsAppClient() {
       }
     });
 
-    return client;
+    return newClient;
   } catch (error) {
     logError("Fatal error setting up WhatsApp client:", error);
     throw error;
   }
 }
 
-// Create a global client variable
-let client;
-
-// Initialize client with retry mechanism
-async function initClient(existingClient = null) {
-  try {
-    // Use existing client if provided, otherwise create a new one
-    client = existingClient || await setupWhatsAppClient().catch(err => {
-      logError("Failed to setup WhatsApp client:", err);
-      return null;
-    });
+// This function is replaced with the optimized version below
+    client = existingClient || await setupWhatsAppClient();
     
     if (!client) {
       logError("Could not create WhatsApp client. Check Chrome installation.");
@@ -367,59 +502,22 @@ async function initClient(existingClient = null) {
     }
   }
 }
-
-// Route: Get QR Code SVG
-app.get("/qr", (req, res) => {
-  if (currentQR) {
-    res.json({ svg: currentQR });
-  } else if (isReady) {
-    res.json({ svg: null, ready: true });
-  } else {
-    res.status(503).json({ error: "QR not ready" });
-  }
-});
-
-// Route: Logout and regenerate QR
-app.post("/logout", async (req, res) => {
-  try {
-    await client.logout();
-    await client.initialize();
-    res.json({ message: "Logged out and regenerating QR" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Email transporter setup
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT, 10),
-  secure: process.env.SMTP_SECURE === "true",
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
-// Helper to send notification emails
-async function sendEmail(to, subject, text) {
-  if (!to) return;
-  try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
-      to,
-      subject,
-      text,
-    });
+    for (const file of files) {
+      const filePath = path.join(uploadsDir, file);
+      // If no active task references this file, delete it
+      const taskExists = await Task.findOne({ mediaPaths: filePath });
+      if (!taskExists) {
+        fs.unlinkSync(filePath);
+        console.log("🗑 Pruned orphaned media file:", filePath);
+      }
+    }
   } catch (err) {
-    console.error("Error sending email:", err);
+    console.error("Error during media pruning:", err);
   }
-}
+});
 
-// Ensure uploads directory exists for persistent storage
-const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
-
+// Receipt schema is now defined above with other models
+// Define all MongoDB schemas
 // User schema/model for authentication
 const userSchema = new mongoose.Schema({
   email: {
@@ -453,200 +551,45 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Create the User model
-const User = mongoose.model("User", userSchema);
+// Create a global client variable
+let client;
 
-// Task schema/model
-const taskSchema = new mongoose.Schema({
-  phone: String,
-  name: { type: String, default: null },
-  text: String,
-  mediaPaths: { type: [String], default: [] },
-  scheduleDate: String,
-  scheduleTime: String,
-  recurrence: {
-    type: String,
-    enum: ["once", "hourly", "daily", "weekly", "monthly", "yearly"],
-    default: "once",
-  },
-  scheduleAt: String,
-  createdAt: { type: Date, default: Date.now },
-  userEmail: String,
-  paused: { type: Boolean, default: false },
-});
-const Task = mongoose.model("Task", taskSchema);
-
-// Schedule existing tasks at startup
-(async () => {
+// Create custom puppeteer browser instance for WAWebJS
+async function createCustomPuppeteerBrowser() {
   try {
-    const existing = await Task.find({ paused: false });
-    existing.forEach(scheduleTask);
-    console.log(`⏰ Scheduled ${existing.length} existing jobs`);
-  } catch (err) {
-    console.error("Error scheduling existing tasks:", err);
-  }
-})();
-
-// Automated pruning: remove media files not referenced by any task every midnight
-schedule.scheduleJob({ hour: 0, minute: 0 }, async () => {
-  try {
-    const files = fs.readdirSync(uploadsDir);
-    for (const file of files) {
-      const filePath = path.join(uploadsDir, file);
-      // If no active task references this file, delete it
-      const taskExists = await Task.findOne({ mediaPaths: filePath });
-      if (!taskExists) {
-        fs.unlinkSync(filePath);
-        console.log("🗑 Pruned orphaned media file:", filePath);
-      }
-    }
-  } catch (err) {
-    console.error("Error during media pruning:", err);
-  }
-});
-
-// Receipt schema/model for delivery/read receipts
-const receiptSchema = new mongoose.Schema({
-  messageId: { type: String, unique: true },
-  task: { type: mongoose.Schema.Types.ObjectId, ref: "Task" },
-  ack: Number,
-  timestamp: Date,
-});
-const Receipt = mongoose.model("Receipt", receiptSchema);
-
-// Message receipt handling is now inside setupWhatsAppClient function
-
-// Modify sendScheduled to record initial receipt
-async function sendScheduled(taskDoc, number) {
-  try {
-    if (taskDoc.mediaPaths && taskDoc.mediaPaths.length) {
-      for (let i = 0; i < taskDoc.mediaPaths.length; i++) {
-        const mediaFile = MessageMedia.fromFilePath(taskDoc.mediaPaths[i]);
-        const opts = {};
-        if (i === 0 && taskDoc.text) {
-          opts.caption = taskDoc.text;
-          opts.sendMediaAsViewOnce = false;
+    const executablePath = await findChromeExecutablePath();
+    
+    // Log launch configuration for debugging
+    logInfo('Launching browser with configuration:');
+    logInfo('- Executable path:', executablePath || 'Default');
+    logInfo('- Arguments:', browserArgs);
+    
+    // Create data directories with proper permissions if they don't exist
+    const dataDir = path.join(__dirname, '.browser-data');
+    const authDir = path.join(__dirname, '.wwebjs_auth');
+    
+    for (const dir of [dataDir, authDir]) {
+      if (!fs.existsSync(dir)) {
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+          logInfo(`Created directory: ${dir}`);
+        } catch (err) {
+          logError(`Failed to create directory ${dir}:`, err);
         }
-        var msg = await client.sendMessage(number, mediaFile, opts);
-        await Receipt.create({
-          messageId: msg.id._serialized,
-          task: taskDoc._id,
-          ack: msg.ack,
-          timestamp: new Date(),
-        });
       }
-    } else {
-      var msg = await client.sendMessage(number, taskDoc.text);
-      await Receipt.create({
-        messageId: msg.id._serialized,
-        task: taskDoc._id,
-        ack: msg.ack,
-        timestamp: new Date(),
-      });
     }
-    await sendEmail(
-      taskDoc.userEmail,
-      "WhatsApp Message Sent",
-      `Your message to ${
-        taskDoc.phone
-      } was sent successfully at ${new Date().toLocaleString()}`
-    );
-  } catch (err) {
-    console.error("Scheduled send failed:", err);
-    await sendEmail(
-      taskDoc.userEmail,
-      "WhatsApp Message Failed",
-      `Failed to send your message to ${
-        taskDoc.phone
-      } at ${new Date().toLocaleString()}. Error: ${err.message}`
-    );
-  }
-}
-
-// Serve My Tasks dashboard
-app.get("/mytasks", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "mytasks.html"));
-});
-
-// Update an existing task (reschedule)
-app.patch("/api/tasks/:id", async (req, res) => {
-  const { scheduleDate, scheduleTime, recurrence } = req.body;
-  const task = await Task.findById(req.params.id);
-  if (!task) return res.status(404).json({ error: "Task not found" });
-  // cancel existing job
-  schedule.cancelJob(task._id.toString());
-  // update fields
-  if (scheduleDate) task.scheduleDate = scheduleDate;
-  if (scheduleTime) task.scheduleTime = scheduleTime;
-  if (recurrence) task.recurrence = recurrence;
-  task.scheduleAt =
-    recurrence === "once"
-      ? `${task.scheduleDate} ${task.scheduleTime}`
-      : task.scheduleTime;
-  await task.save();
-  scheduleTask(task);
-  res.json(task);
-});
-
-// Pause a task
-app.post("/api/tasks/:id/pause", async (req, res) => {
-  const task = await Task.findById(req.params.id);
-  if (!task) return res.status(404).json({ error: "Task not found" });
-  schedule.cancelJob(task._id.toString());
-  task.paused = true;
-  await task.save();
-  res.json(task);
-});
-
-// Resume a task
-app.post("/api/tasks/:id/resume", async (req, res) => {
-  const task = await Task.findById(req.params.id);
-  if (!task) return res.status(404).json({ error: "Task not found" });
-  task.paused = false;
-  await task.save();
-  scheduleTask(task);
-  res.json(task);
-});
-
-// Utility to schedule jobs for a task document
-function scheduleTask(t) {
-  const number = t.phone.replace(/\D/g, "") + "@c.us";
-  let job;
-  const [hour, minute] = t.scheduleTime
-    ? t.scheduleTime.split(":").map((n) => parseInt(n, 10))
-    : [null, null];
-  // hourly recurrence: run every hour at specified minute
-  if (t.recurrence === "hourly" && minute != null) {
-    job = schedule.scheduleJob({ minute }, async () =>
-      sendScheduled(t, number)
-    );
-  } else if (t.recurrence === "daily" && hour != null) {
-    job = schedule.scheduleJob({ hour, minute }, async () =>
-      sendScheduled(t, number)
-    );
-  } else if (t.recurrence === "weekly" && t.scheduleDate && hour != null) {
-    const dow = new Date(t.scheduleDate).getDay();
-    job = schedule.scheduleJob({ dayOfWeek: dow, hour, minute }, async () =>
-      sendScheduled(t, number)
-    );
-  }
-  // monthly recurrence: run every month on the day-of-month at time
-  else if (t.recurrence === "monthly" && t.scheduleDate && hour != null) {
-    const day = new Date(t.scheduleDate).getDate();
-    job = schedule.scheduleJob({ date: day, hour, minute }, async () =>
-      sendScheduled(t, number)
-    );
-  } else if (t.recurrence === "yearly" && t.scheduleDate && hour != null) {
-    const dt = new Date(t.scheduleDate);
-    job = schedule.scheduleJob(
-      { month: dt.getMonth(), date: dt.getDate(), hour, minute },
-      async () => sendScheduled(t, number)
-    );
-  } else if (t.recurrence === "once" && t.scheduleDate && t.scheduleTime) {
-    const dt = new Date(`${t.scheduleDate}T${t.scheduleTime}`);
-    job = schedule.scheduleJob(dt, async () => {
-      await sendScheduled(t, number);
-      // remove task from database
+    
+    // Launch browser with optimized configuration
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: browserArgs,
+      executablePath,
+      ignoreHTTPSErrors: true,
+      defaultViewport: { width: 1280, height: 800 },
+      timeout: 120000,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      
       await Task.findByIdAndDelete(t._id);
       // cleanup uploaded files
       if (t.mediaPaths && t.mediaPaths.length) {
