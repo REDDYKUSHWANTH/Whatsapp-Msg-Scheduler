@@ -421,6 +421,18 @@ function scheduleTask(t) {
 
 // Route: Send message
 app.post("/send", async (req, res) => {
+  if (!isReady) {
+    return res
+      .status(503)
+      .json({ error: "WhatsApp client not ready – scan the QR code first" });
+  }
+  // ── DEBUG: log the incoming payload and readiness
+  console.log("▶ /send called:", {
+    body: req.body,
+    files: req.files,
+    isReady,
+  });
+
   // Persist attachments to disk immediately
   let mediaPaths = [];
   if (req.files && req.files.media) {
