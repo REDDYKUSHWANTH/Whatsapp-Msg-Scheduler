@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Tasks Dashboard</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: linear-gradient(135deg, #74abe2, #5563de);
+        font-family: "Roboto", sans-serif;
+      }
+      .container {
+        background: #fff;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        width: 100%;
+        max-width: 800px;
+      }
+      header {
+        background: #5563de;
+        color: #fff;
+        text-align: center;
+        padding: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+      .content {
+        padding: 2rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1rem;
+      }
+      th,
+      td {
+        padding: 0.5rem;
+        border: 1px solid #ccc;
+        text-align: left;
+      }
+      .action-btn {
+        margin-right: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        border: none;
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      .pause-btn {
+        background: #dc3545;
+      }
+      .pause-btn:hover {
+        background: #a71d2a;
+      }
+      .resume-btn {
+        background: #28a745;
+      }
+      .resume-btn:hover {
+        background: #1c7430;
+      }
+      .edit-btn {
+        background: #5563de;
+      }
+      .edit-btn:hover {
+        background: #4350b5;
+      }
+      .danger-btn {
+        background: #333;
+      }
+      .danger-btn:hover {
+        background: #000;
+      }
+      button.back-btn {
+        display: block;
+        width: 100%;
+        padding: 0.75rem;
+        background: #888;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-top: 1rem;
+      }
+      button.back-btn:hover {
+        background: #666;
+      }
+      /* Form control styling */
+      input,
+      textarea,
+      select {
+        width: 100%;
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 1rem;
+      }
+      /* Schedule grid and modal styles */
+      .schedule-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        background: #f9fbfd;
+        padding: 1rem;
+        border-radius: 6px;
+        margin-bottom: 1rem;
+      }
+      @media (min-width: 600px) {
+        .schedule-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+      .edit-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+      .modal-content {
+        background: #fff;
+        padding: 1.5rem 1rem;
+        border-radius: 10px;
+        width: 90%;
+        max-width: 400px;
+      }
+      .modal-content h3 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+        font-size: 1.25rem;
+        font-weight: 500;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        margin-top: 1rem;
+      }
+      .modal-actions .action-btn {
+        min-width: 80px;
+      }
+      .save-btn {
+        background: #28a745;
+      }
+      .save-btn:hover {
+        background: #218838;
+      }
+      .cancel-btn {
+        background: #dc3545;
+      }
+      .cancel-btn:hover {
+        background: #c82333;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header>My Tasks Dashboard</header>
+      <div class="content">
+        <div style="text-align: right; margin-bottom: 1rem">
+          <a
+            href="/receipts"
+            style="
+              display: inline-block;
+              padding: 0.5rem 1rem;
+              background: #5563de;
+              color: #fff;
+              border-radius: 4px;
+              text-decoration: none;
+            "
+            >View Receipts</a
+          >
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Phone</th>
+              <th>Name</th>
+              <th>Message</th>
+              <th>Schedule At</th>
+              <th>Recurrence</th>
+              <th>Paused?</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tasksBody"></tbody>
+        </table>
+        <button class="back-btn" onclick="window.location='/'">
+          Back to Home
+        </button>
+      </div>
+    </main>
+    <!-- Edit Task Modal -->
+    <div id="editModal" class="edit-modal">
+      <div class="modal-content">
+        <h3>Edit Task</h3>
+        <div class="schedule-grid">
+          <div>
+            <label for="editDate">Schedule Date:</label>
+            <input type="date" id="editDate" />
+          </div>
+          <div>
+            <label for="editTime">Schedule Time:</label>
+            <input type="time" id="editTime" />
+          </div>
+          <div>
+            <label for="editRecurrence">Recurrence:</label>
+            <select id="editRecurrence">
+              <option value="">None</option>
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="cancelBtn" class="action-btn cancel-btn">Cancel</button>
+          <button id="saveBtn" class="action-btn save-btn">Save</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      let tasksData = [];
+      async function loadTasks() {
+        try {
+          const res = await fetch("/api/tasks");
+          const tasks = await res.json();
+          window.tasks = tasks;
+          const tbody = document.getElementById("tasksBody");
+          tbody.innerHTML = "";
+          tasks.forEach((t) => {
+            const tr = document.createElement("tr");
+            const actionButtons = t.paused
+              ? `<button class="action-btn resume-btn" onclick="resumeTask('${t._id}')">Resume</button>`
+              : `<button class="action-btn pause-btn" onclick="pauseTask('${t._id}')">Pause</button>`;
+            tr.innerHTML = `
+              <td>${t.phone}</td>
+              <td>${t.name || ""}</td>
+              <td>${t.text}</td>
+              <td>${t.scheduleAt}</td>
+              <td>${t.recurrence}</td>
+              <td>${t.paused ? "Yes" : "No"}</td>
+              <td>
+                ${actionButtons}
+                <button class="action-btn edit-btn" onclick="openEditModal('${
+                  t._id
+                }')">Edit</button>
+                <button class="action-btn danger-btn" onclick="deleteTask('${
+                  t._id
+                }')">Delete</button>
+              </td>
+            `;
+            tbody.appendChild(tr);
+          });
+        } catch (err) {
+          console.error("Failed to load tasks:", err);
+        }
+      }
+      function pauseTask(id) {
+        fetch(`/api/tasks/${id}/pause`, { method: "POST" }).then(loadTasks);
+      }
+      function resumeTask(id) {
+        fetch(`/api/tasks/${id}/resume`, { method: "POST" }).then(loadTasks);
+      }
+      function deleteTask(id) {
+        fetch("/api/tasks/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: [id] }),
+        }).then(loadTasks);
+      }
+      // Open edit modal
+      function openEditModal(id) {
+        const task = window.tasks.find((t) => t._id === id);
+        if (!task) return;
+        document.getElementById("editDate").value = task.scheduleDate || "";
+        document.getElementById("editTime").value = task.scheduleTime || "";
+        document.getElementById("editRecurrence").value = task.recurrence || "";
+        document.getElementById("saveBtn").dataset.id = id;
+        document.getElementById("editModal").style.display = "flex";
+      }
+      // Close edit modal
+      function closeEditModal() {
+        document.getElementById("editModal").style.display = "none";
+      }
+      // Modal cancel
+      document
+        .getElementById("cancelBtn")
+        .addEventListener("click", closeEditModal);
+      // Modal save
+      document.getElementById("saveBtn").addEventListener("click", () => {
+        const id = document.getElementById("saveBtn").dataset.id;
+        const newDate = document.getElementById("editDate").value;
+        const newTime = document.getElementById("editTime").value;
+        const newRec = document.getElementById("editRecurrence").value;
+        fetch(`/api/tasks/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scheduleDate: newDate,
+            scheduleTime: newTime,
+            recurrence: newRec,
+          }),
+        })
+          .then(() => {
+            closeEditModal();
+            loadTasks();
+          })
+          .catch(console.error);
+      });
+      loadTasks();
+    </script>
+  </body>
+</html>

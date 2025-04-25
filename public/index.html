@@ -44,7 +44,8 @@
       }
 
       input,
-      textarea {
+      textarea,
+      select {
         width: 100%;
         padding: 0.75rem;
         margin-bottom: 1rem;
@@ -87,6 +88,29 @@
       .success {
         color: #28a745;
       }
+
+      /* Focus style for all form controls */
+      input:focus,
+      textarea:focus,
+      select:focus {
+        border-color: #5563de;
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(85, 99, 222, 0.2);
+      }
+
+      /* Flex layout for date/time fields */
+      .schedule-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+
+      .schedule-row > div {
+        flex: none;
+      }
+
+      /* Removed custom grouping and focus styles per request */
     </style>
   </head>
 
@@ -115,49 +139,55 @@
           Regenerate QR Code
         </button>
       </div>
-      <h1>WhatsApp Web Sender</h1>
+      <!-- <div style="text-align: center; margin-bottom: 1rem">
+        <a
+          href="/signup"
+          style="
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: #5563de;
+            color: #fff;
+            border-radius: 4px;
+            text-decoration: none;
+          "
+          >Sign Up</a
+        >
+      </div> -->
+      <h1>WhatsApp Msg Scheduler</h1>
       <button
         type="button"
-        id="viewTasks"
+        onclick="window.location='/mytasks';"
         style="
           display: block;
           width: 100%;
           padding: 0.75rem;
-          margin: 1rem 0;
-          background: #28a745;
+          margin: 0.5rem 0;
+          background: #5563de;
           color: #fff;
           border: none;
           border-radius: 6px;
           cursor: pointer;
         "
       >
-        View Scheduled Tasks
+        My Tasks Dashboard
       </button>
-      <!-- Inline Tasks List -->
-      <div id="tasksSection" style="display: none; margin-bottom: 1rem">
-        <h2>Scheduled Tasks</h2>
-        <select
-          id="tasksSelect"
-          multiple
-          style="width: 100%; height: 150px; margin-bottom: 0.5rem"
-        ></select>
-        <button
-          id="deleteTasks"
-          type="button"
-          style="
-            display: block;
-            width: 100%;
-            padding: 0.5rem;
-            background: #dc3545;
-            color: #fff;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-          "
-        >
-          Delete Selected
-        </button>
-      </div>
+      <button
+        type="button"
+        onclick="window.location='/logout';"
+        style="
+          display: block;
+          width: 100%;
+          padding: 0.75rem;
+          margin: 0.5rem 0;
+          background: #dc3545;
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+        "
+      >
+        Log Out
+      </button>
       <form id="messageForm" novalidate>
         <h2>Send a Message</h2>
 
@@ -169,6 +199,8 @@
           pattern="^\+?[0-9]{10,15}$"
           required
         />
+        <label for="name">Recipient Name (optional)</label>
+        <input type="text" id="name" placeholder="e.g. John Doe" />
 
         <label for="message">Message</label>
         <textarea
@@ -177,17 +209,36 @@
           required
         ></textarea>
 
-        <label for="media">Media (optional):</label>
-        <input type="file" id="media" accept="image/*" />
-        <label for="scheduleDate">Schedule Date (optional):</label>
-        <input type="date" id="scheduleDate" />
-        <label for="scheduleTime">Schedule Time (optional):</label>
-        <input type="time" id="scheduleTime" />
+        <label for="media">Attachments (optional):</label>
+        <input type="file" id="media" multiple accept="*/*" />
+        <div
+          id="mediaPreview"
+          style="margin-bottom: 1rem; text-align: center"
+        ></div>
+        <button
+          type="button"
+          id="clearMedia"
+          style="display: none; margin-bottom: 1rem"
+        >
+          Clear Files
+        </button>
+        <div class="schedule-row">
+          <div>
+            <label for="scheduleDate">Schedule Date (optional):</label>
+            <input type="date" id="scheduleDate" />
+          </div>
+          <div>
+            <label for="scheduleTime">Schedule Time (optional):</label>
+            <input type="time" id="scheduleTime" />
+          </div>
+        </div>
         <label for="recurrence">Recurrence:</label>
         <select id="recurrence">
           <option value="">None</option>
+          <option value="hourly">Hourly</option>
           <option value="daily">Daily</option>
           <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
           <option value="yearly">Yearly</option>
         </select>
 
@@ -227,57 +278,6 @@
       loadQR();
       setInterval(loadQR, 3000);
 
-      // View Tasks button handler: fetch and render tasks in dropdown
-      const tasksBtn = document.getElementById("viewTasks");
-      const tasksSection = document.getElementById("tasksSection");
-      const tasksSelect = document.getElementById("tasksSelect");
-      tasksBtn.addEventListener("click", async () => {
-        try {
-          const res = await fetch("/api/tasks");
-          const data = await res.json();
-          tasksSelect.innerHTML = "";
-          if (data.length === 0) {
-            const opt = document.createElement("option");
-            opt.disabled = true;
-            opt.textContent = "No scheduled tasks.";
-            tasksSelect.appendChild(opt);
-          } else {
-            data.forEach((t) => {
-              const opt = document.createElement("option");
-              opt.value = t.id;
-              opt.textContent = `[${t.recurrence}] To ${t.phone.replace(
-                "@c.us",
-                ""
-              )} at ${t.scheduleAt}`;
-              tasksSelect.appendChild(opt);
-            });
-          }
-          tasksSection.style.display = "block";
-        } catch (err) {
-          console.error("Failed to load tasks:", err);
-        }
-      });
-
-      // Delete Selected tasks handler
-      const deleteBtn = document.getElementById("deleteTasks");
-      deleteBtn.addEventListener("click", async () => {
-        const selected = Array.from(tasksSelect.selectedOptions).map(
-          (o) => o.value
-        );
-        if (!selected.length) return;
-        try {
-          await fetch("/api/tasks/delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ids: selected }),
-          });
-          // Refresh dropdown
-          tasksBtn.click();
-        } catch (err) {
-          console.error("Failed to delete tasks:", err);
-        }
-      });
-
       // Regenerate QR button handler
       const regenBtn = document.getElementById("regenerateQR");
       regenBtn.addEventListener("click", async () => {
@@ -297,9 +297,15 @@
 
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
+        // Clear previews immediately on send
+        const previewContainer = document.getElementById("mediaPreview");
+        const clearBtn = document.getElementById("clearMedia");
+        previewContainer.innerHTML = "";
+        clearBtn.style.display = "none";
         statusDiv.textContent = "Processing...";
         statusDiv.classList.remove("error");
         const phone = document.getElementById("phone").value;
+        const name = document.getElementById("name").value;
         const text = document.getElementById("message").value;
         const scheduleDate = document.getElementById("scheduleDate").value;
         const scheduleTime = document.getElementById("scheduleTime").value;
@@ -307,6 +313,7 @@
         const mediaInput = document.getElementById("media");
         const formData = new FormData();
         formData.append("phone", phone);
+        formData.append("name", name);
         formData.append("text", text);
         if (scheduleDate) formData.append("scheduleDate", scheduleDate);
         if (scheduleTime) formData.append("scheduleTime", scheduleTime);
@@ -333,6 +340,9 @@
             document.getElementById("scheduleDate").value = "";
             document.getElementById("scheduleTime").value = "";
             document.getElementById("recurrence").value = "";
+            document.getElementById("name").value = "";
+            document.getElementById("phone").value = "";
+            document.getElementById("message").value = "";
           } else {
             statusDiv.classList.add("error");
             statusDiv.textContent = `Error: ${json.error || res.statusText}`;
@@ -341,6 +351,58 @@
           statusDiv.classList.add("error");
           statusDiv.textContent = `Error: ${err}`;
         }
+      });
+
+      // Preview multiple attachments of any type
+      const mediaInputPreview = document.getElementById("media");
+      const previewContainer = document.getElementById("mediaPreview");
+      const clearBtn = document.getElementById("clearMedia");
+      mediaInputPreview.addEventListener("change", () => {
+        previewContainer.innerHTML = "";
+        clearBtn.style.display = "none";
+        const files = mediaInputPreview.files;
+        if (files && files.length > 0) {
+          Array.from(files).forEach((file) => {
+            const url = URL.createObjectURL(file);
+            let elem;
+            if (file.type.startsWith("image/")) {
+              elem = document.createElement("img");
+              elem.src = url;
+              elem.style.maxWidth = "100%";
+              elem.style.maxHeight = "200px";
+            } else if (file.type.startsWith("video/")) {
+              elem = document.createElement("video");
+              elem.src = url;
+              elem.controls = true;
+              elem.style.maxWidth = "100%";
+              elem.style.maxHeight = "200px";
+            } else if (file.type === "application/pdf") {
+              elem = document.createElement("iframe");
+              elem.src = url;
+              elem.style.width = "100%";
+              elem.style.height = "200px";
+            } else if (file.type.startsWith("audio/")) {
+              elem = document.createElement("audio");
+              elem.src = url;
+              elem.controls = true;
+            } else {
+              elem = document.createElement("div");
+              const link = document.createElement("a");
+              link.href = url;
+              link.textContent = file.name;
+              link.target = "_blank";
+              elem.appendChild(link);
+            }
+            previewContainer.appendChild(elem);
+          });
+          clearBtn.style.display = "inline-block";
+        }
+      });
+      // Clear selected attachments and previews
+      clearBtn.addEventListener("click", () => {
+        mediaInputPreview.value = "";
+        previewContainer.innerHTML = "";
+        clearBtn.style.display = "none";
       });
     </script>
   </body>
