@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-scheduler
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongo:27017/whatsapp-scheduler
+      - SESSION_SECRET=your_session_secret_here_change_me
+      # Email Configuration (uncomment and fill these when needed)
+      # - SMTP_HOST=smtp.example.com
+      # - SMTP_PORT=587
+      # - SMTP_SECURE=false
+      # - SMTP_USER=user@example.com
+      # - SMTP_PASS=your_password
+      # - EMAIL_FROM=no-reply@example.com
+      # Google OAuth (uncomment and fill these when needed)
+      # - GOOGLE_CLIENT_ID=your_client_id
+      # - GOOGLE_CLIENT_SECRET=your_client_secret
+      # - GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+    volumes:
+      - ./uploads:/usr/src/app/uploads
+      - whatsapp-auth:/usr/src/app/.wwebjs_auth
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:latest
+    container_name: mongo-whatsapp
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    environment:
+      # If you need authentication, uncomment and set these
+      # - MONGO_INITDB_ROOT_USERNAME=root
+      # - MONGO_INITDB_ROOT_PASSWORD=example_password
+
+volumes:
+  mongodb-data:
+    driver: local
+  whatsapp-auth:
+    driver: local
+
