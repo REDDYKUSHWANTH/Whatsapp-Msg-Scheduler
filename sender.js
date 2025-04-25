@@ -14,6 +14,11 @@ const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 
+// Puppeteer-extra for improved browser automation
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -117,38 +122,251 @@ app.get("/logout", (req, res) => {
   });
 });
 
-// WhatsApp Client Initialization (no persistent auth to force QR scan each time)
-const client = new Client({
-  puppeteer: {
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    executablePath: "/usr/bin/google-chrome-stable",
-  },
-});
+// WhatsApp Client Initialization with puppeteer-extra and stealth plugin
+// Detection and logging helpers
+const isWin = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
+const isLinux = process.platform === 'linux';
+const logDebug = (...args) => console.log(`[DEBUG]`, ...args);
+const logError = (...args) => console.error(`[ERROR]`, ...args);
+const logInfo = (...args) => console.log(`[INFO]`, ...args);
 
+// Find Chrome executable path based on platform
+async function findChromeExecutablePath() {
+  logInfo(`Detecting Chrome on ${process.platform}...`);
+  
+  // Use provided path from environment variable if available
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    logInfo(`Using Chrome from environment variable: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  
+  // Default paths by platform
+  if (isWin) {
+    const possiblePaths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.ProgramFiles + '\\Google\\Chrome\\Application\\chrome.exe',
+      process.env['ProgramFiles(x86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
+    ].filter(Boolean); // Remove any undefined paths
+    
+    logDebug('Searching for Chrome in Windows paths:', possiblePaths);
+    
+    for (const chromePath of possiblePaths) {
+      try {
+        if (fs.existsSync(chromePath)) {
+          logInfo(`Found Chrome at: ${chromePath}`);
+          return chromePath;
+        }
+      } catch (err) {
+        // Skip this path
+      }
+    }
+  } else if (isMac) {
+    const macPath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    if (fs.existsSync(macPath)) return macPath;
+  } else if (isLinux) {
+    const linuxPaths = [
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+    ];
+    
+    for (const chromePath of linuxPaths) {
+      try {
+        if (fs.existsSync(chromePath)) return chromePath;
+      } catch (err) {
+        // Skip this path
+      }
+    }
+  }
+  
+  logInfo('No Chrome installation found, will use puppeteer bundled browser');
+  return null;
+}
+
+// Configure browser arguments for better compatibility
+const browserArgs = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-accelerated-2d-canvas",
+  "--no-first-run",
+  "--disable-extensions",
+  "--ignore-certificate-errors",
+  "--ignore-certificate-errors-spki-list",
+  "--disable-features=IsolateOrigins,site-per-process",
+  "--user-data-dir=" + path.join(__dirname, '.browser-data')
+];
+
+// OS-specific optimizations
+if (isWin) {
+  browserArgs.push("--disable-features=TranslateUI");
+  browserArgs.push("--disable-background-networking");
+} else if (isLinux) {
+  browserArgs.push("--no-zygote");
+  browserArgs.push("--single-process");
+}
+
+// Initialize state variables
 let currentQR = null;
 let isReady = false;
+let initRetries = 0;
+const MAX_RETRIES = 3;
 
-// Generate QR Code for Web
-client.on("qr", async (qr) => {
-  currentQR = await qrcode.toString(qr, { type: "svg" });
-  isReady = false;
-});
+// Create custom puppeteer browser instance for WAWebJS
+async function createCustomPuppeteerBrowser() {
+  try {
+    const executablePath = await findChromeExecutablePath();
+    
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: browserArgs,
+      executablePath,
+      ignoreHTTPSErrors: true,
+      defaultViewport: { width: 1280, height: 800 },
+      timeout: 120000,
+    });
+    
+    return browser;
+  } catch (error) {
+    logError('Error creating custom browser:', error);
+    throw error;
+  }
+}
 
-// Ready state
-client.on("ready", () => {
-  console.log("WhatsApp is ready!");
-  currentQR = null;
-  isReady = true;
-});
+// Initialize the WhatsApp Web client
+async function setupWhatsAppClient() {
+  try {
+    // Create the WhatsApp client with custom puppeteer implementation
+    const client = new Client({
+      authStrategy: new LocalAuth({ 
+        dataPath: path.join(__dirname, '.wwebjs_auth'),
+        clientId: 'whatsapp-scheduler'
+      }),
+      puppeteer: {
+        // Use our custom browser instance
+        browser: await createCustomPuppeteerBrowser(),
+      },
+      webVersionCache: { type: 'local' },
+      restartOnAuthFail: true,
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    });
 
-client.on("auth_failure", () => {
-  console.log("Auth failure. Please scan QR again.");
-  currentQR = null;
-  isReady = false;
-});
+    // Set up event handlers
+    client.on("qr", async (qr) => {
+      try {
+        currentQR = await qrcode.toString(qr, { type: "svg" });
+        logInfo("QR Code generated - scan to connect WhatsApp");
+        isReady = false;
+      } catch (err) {
+        logError("Error generating QR code:", err);
+      }
+    });
 
-client.initialize();
+    client.on("ready", () => {
+      logInfo("WhatsApp is ready and connected!");
+      currentQR = null;
+      isReady = true;
+      initRetries = 0;
+    });
+
+    client.on("auth_failure", (msg) => {
+      logError("WhatsApp authentication failed:", msg);
+      currentQR = null;
+      isReady = false;
+    });
+
+    client.on("disconnected", (reason) => {
+      logInfo("WhatsApp disconnected. Reason:", reason);
+      isReady = false;
+      
+      if (initRetries < MAX_RETRIES) {
+        const delay = 5000 + (initRetries * 2000); // Increasing backoff
+        logInfo(`Will attempt reconnection in ${delay/1000} seconds (${initRetries+1}/${MAX_RETRIES})...`);
+        
+        setTimeout(() => {
+          initClient(client);
+        }, delay);
+      } else {
+        logError("Maximum reconnection attempts reached. Please restart the server.");
+      }
+    });
+
+    // Add error logging
+    client.on("message_create", (msg) => {
+      logDebug("New message created:", msg.body.substring(0, 20) + "...");
+    });
+    
+    // Listen for delivery/read acknowledgments
+    client.on("message_ack", async (msg, ack) => {
+      try {
+        const messageId = msg.id._serialized;
+        await Receipt.findOneAndUpdate(
+          { messageId },
+          { ack, timestamp: new Date() },
+          { upsert: true }
+        );
+      } catch (err) {
+        logError("Error saving receipt:", err);
+      }
+    });
+
+    return client;
+  } catch (error) {
+    logError("Fatal error setting up WhatsApp client:", error);
+    throw error;
+  }
+}
+
+// Create a global client variable
+let client;
+
+// Initialize client with retry mechanism
+async function initClient(existingClient = null) {
+  try {
+    // Use existing client if provided, otherwise create a new one
+    client = existingClient || await setupWhatsAppClient().catch(err => {
+      logError("Failed to setup WhatsApp client:", err);
+      return null;
+    });
+    
+    if (!client) {
+      logError("Could not create WhatsApp client. Check Chrome installation.");
+      return;
+    }
+
+    initRetries++;
+    logInfo(`Initializing WhatsApp client (attempt ${initRetries}/${MAX_RETRIES})...`);
+    
+    await client.initialize().catch(err => {
+      logError("Failed to initialize WhatsApp client:", err);
+      
+      if (initRetries < MAX_RETRIES) {
+        const delay = 10000 * initRetries; // Increasing backoff
+        logInfo(`Retrying in ${delay/1000} seconds... (${initRetries}/${MAX_RETRIES})`);
+        
+        setTimeout(() => {
+          initClient(client);
+        }, delay);
+      } else {
+        logError("Maximum initialization retries reached. WhatsApp features will not be available.");
+      }
+    });
+  } catch (err) {
+    logError("Unexpected error during client initialization:", err);
+    
+    if (initRetries < MAX_RETRIES) {
+      const delay = 10000 * initRetries;
+      logInfo(`Retrying after error in ${delay/1000} seconds... (${initRetries}/${MAX_RETRIES})`);
+      
+      setTimeout(() => {
+        initClient(null);
+      }, delay);
+    }
+  }
+}
 
 // Route: Get QR Code SVG
 app.get("/qr", (req, res) => {
@@ -201,6 +419,42 @@ async function sendEmail(to, subject, text) {
 // Ensure uploads directory exists for persistent storage
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+
+// User schema/model for authentication
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please use a valid email address']
+  },
+  password: {
+    type: String,
+    required: [true, 'Password is required'],
+    minlength: [6, 'Password must be at least 6 characters']
+  },
+  name: {
+    type: String,
+    trim: true
+  },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  lastLogin: Date
+}, {
+  timestamps: true
+});
+
+// Create the User model
+const User = mongoose.model("User", userSchema);
 
 // Task schema/model
 const taskSchema = new mongoose.Schema({
@@ -260,19 +514,7 @@ const receiptSchema = new mongoose.Schema({
 });
 const Receipt = mongoose.model("Receipt", receiptSchema);
 
-// Listen for delivery/read acknowledgments
-client.on("message_ack", async (msg, ack) => {
-  try {
-    const messageId = msg.id._serialized;
-    await Receipt.findOneAndUpdate(
-      { messageId },
-      { ack, timestamp: new Date() },
-      { upsert: true }
-    );
-  } catch (err) {
-    console.error("Error saving receipt:", err);
-  }
-});
+// Message receipt handling is now inside setupWhatsAppClient function
 
 // Modify sendScheduled to record initial receipt
 async function sendScheduled(taskDoc, number) {
@@ -608,28 +850,37 @@ app.get("/receipts", (req, res) => {
 // API endpoint to fetch all receipts with associated task info
 app.get("/api/receipts", async (req, res) => {
   try {
-    const receipts = await Receipt.find().populate("task").exec();
+    const receipts = await Receipt.find().populate('task');
     res.json(receipts);
   } catch (err) {
-    console.error("Failed to load receipts:", err);
-    res.status(500).json({ error: "Failed to load receipts" });
+    logError("Error fetching receipts:", err);
+    res.status(500).json({ error: "Failed to fetch receipts", details: err.message });
   }
 });
 
-// MongoDB connection and User model
-mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("✅ Connected to MongoDB"))
-  .catch((err) => console.error("MongoDB connection error:", err));
-const userSchema = new mongoose.Schema({
-  email: { type: String, unique: true },
-  password: String,
-});
-const User = mongoose.model("User", userSchema);
+// Start the WhatsApp client initialization process
+(async function startClient() {
+  try {
+    // Start client initialization
+    await initClient();
+  } catch (err) {
+    logError("Failed to start WhatsApp client:", err);
+    // Continue with server initialization even if WhatsApp client fails
+  }
+})();
 
-app.listen(port, () => {
-  console.log(`✅ Server running at http://localhost:${port}/signup.html`);
-});
+// Connect to MongoDB
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log("✅ Connected to MongoDB");
+    
+    // Start the server after MongoDB connection is established
+    app.listen(port, () => {
+      console.log(`✅ Server running at http://localhost:${port}/signup.html`);
+    });
+  })
+  .catch(err => {
+    console.error("MongoDB connection error:", err);
+    process.exit(1);
+  });
