@@ -4,7 +4,8 @@
   "description": "Self-hosted WhatsApp message sender using whatsapp-web.js",
   "main": "sender.js",
   "scripts": {
-    "start": "node sender.js"
+    "start": "node sender.js",
+    "build": "npm install --production=false && npm install puppeteer"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
