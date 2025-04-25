@@ -16,7 +16,12 @@ RUN apk add --no-cache --virtual .build-deps \
     tzdata \
     wget \
     # Needed for puppeteer
-    dumb-init
+    dumb-init \
+    # For proper permissions
+    shadow
+
+# Create a non-root user to run the application
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Set up browser environment with memory optimizations
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
@@ -24,7 +29,7 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
     NODE_ENV=production \
     PORT=3000 \
     # Browser flags for low resource usage
-    PUPPETEER_ARGS="--disable-dev-shm-usage --disable-gpu --disable-software-rasterizer --disable-extensions --no-sandbox --disable-setuid-sandbox --no-zygote --single-process --disable-features=site-per-process"
+    PUPPETEER_ARGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --disable-software-rasterizer --disable-extensions --disable-setuid-sandbox --no-zygote --single-process --disable-features=site-per-process"
 
 # Create workdir
 WORKDIR /app
@@ -41,10 +46,16 @@ RUN npm install --production=false \
 # Copy application files
 COPY . .
 
-# Create uploads directory with proper permissions
+# Create uploads directory and set proper permissions
 RUN mkdir -p uploads \
+    mkdir -p .wwebjs_auth \
+    mkdir -p .browser-data \
+    # Set ownership of all application files
+    && chown -R appuser:appgroup /app \
+    # Ensure data directories have the right permissions
     && chmod -R 777 uploads \
-    && chmod -R 777 /app
+    && chmod -R 777 .wwebjs_auth \
+    && chmod -R 777 .browser-data
 
 # Add support for health checks
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
@@ -52,6 +63,9 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 
 # Expose port
 EXPOSE 3000
+
+# Change to non-root user
+USER appuser
 
 # Use dumb-init to properly handle signals
 ENTRYPOINT ["dumb-init", "--"]
