@@ -3,6 +3,7 @@ services:
   - type: web
     name: whatsapp-scheduler
     env: node
+    runtime: node
     plan: free
     buildCommand: npm run build
     startCommand: npm start
@@ -10,27 +11,27 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 3000
+        value: "3000"
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: false
+        value: "false"
       - key: SESSION_SECRET
         generateValue: true
       - key: MONGODB_URI
         fromService:
-          type: database
-          name: mongodb
+          name: mongodb-whatsapp
+          type: pserv
           property: connectionString
       # Uncomment and configure these as needed
       # - key: SMTP_HOST
       #   value: smtp.example.com
       # - key: SMTP_PORT
-      #   value: 587
+      #   value: "587"
       # - key: SMTP_SECURE
-      #   value: false
+      #   value: "false"
       # - key: SMTP_USER
       #   value: user@example.com
       # - key: SMTP_PASS
-      #   sync: false # This will prompt for the value during deployment
+      #   sync: false
       # - key: EMAIL_FROM
       #   value: no-reply@example.com
       # - key: GOOGLE_CLIENT_ID
@@ -44,13 +45,23 @@ services:
       mountPath: /opt/render/project/src/uploads
       sizeGB: 1
     autoDeploy: true
-    healthCheckPath: /
+    healthCheck:
+      path: /
+      port: 3000
     
   # MongoDB database
-  - type: database
-    name: mongodb
-    plan: free # Upgrade to a paid plan for production
-    databaseName: whatsapp-scheduler
+  - type: pserv
+    name: mongodb-whatsapp
+    plan: free
+    env: image
+    image: mongo:6
+    disk:
+      name: mongodb-data
+      mountPath: /data/db
+      sizeGB: 1
+    envVars:
+      - key: MONGO_INITDB_DATABASE
+        value: whatsapp-scheduler
     ipAllowList:
       - source: 0.0.0.0/0
         description: everywhere
