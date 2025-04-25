@@ -3,7 +3,7 @@ services:
   - type: web
     name: whatsapp-scheduler
     env: docker
-    plan: standard
+    plan: free # Use free tier
     dockerfilePath: ./Dockerfile
     dockerContext: .
     envVars:
@@ -11,12 +11,14 @@ services:
         value: production
       - key: PORT
         value: 3000
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=256
       - key: SESSION_SECRET
         generateValue: true
       - key: MONGODB_URI
         fromService:
-          type: database
-          name: mongodb
+          type: pserv
+          name: mongodb-whatsapp
           property: connectionString
       # Uncomment and configure these as needed
       # - key: SMTP_HOST
@@ -39,17 +41,42 @@ services:
       #   value: https://your-app-name.onrender.com/auth/google/callback
     disk:
       name: whatsapp-data
-      mountPath: /usr/src/app/uploads
-      sizeGB: 10
+      mountPath: /app/uploads
+      sizeGB: 1 # Reduced size for free tier
     autoDeploy: true
-    healthCheckPath: /
-    numInstances: 1
+    healthCheck:
+      path: /
+      port: 3000
+      timeoutSeconds: 10
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+      targetMemoryPercent: 90 # Keep memory usage efficient
 
-  # MongoDB database
-  - type: database
-    name: mongodb
-    plan: free # Upgrade to a paid plan for production
-    databaseName: whatsapp-scheduler
+  # MongoDB service
+  - type: pserv
+    name: mongodb-whatsapp
+    env: image
+    image: mongo:6-alpine
+    plan: free
+    disk:
+      name: mongodb-data
+      mountPath: /data/db
+      sizeGB: 1
+    envVars:
+      - key: MONGO_INITDB_DATABASE
+        value: whatsapp-scheduler
+    # Resource optimization via MongoDB command
+    cmd: mongod --storageEngine=wiredTiger --wiredTigerCacheSizeGB=0.25
+    healthCheck:
+      httpPath: /
+      port: 27017
+      command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+      initialDelaySeconds: 10
+      timeoutSeconds: 5
+      intervalSeconds: 30
+      successThreshold: 1
+      failureThreshold: 3
     ipAllowList:
       - source: 0.0.0.0/0
         description: everywhere

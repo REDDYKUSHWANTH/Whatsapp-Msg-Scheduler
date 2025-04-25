@@ -13,6 +13,8 @@ services:
       - NODE_ENV=production
       - MONGODB_URI=mongodb://mongo:27017/whatsapp-scheduler
       - SESSION_SECRET=your_session_secret_here_change_me
+      # Resource optimization env vars
+      - NODE_OPTIONS=--max-old-space-size=256
       # Email Configuration (uncomment and fill these when needed)
       # - SMTP_HOST=smtp.example.com
       # - SMTP_PORT=587
@@ -25,23 +27,45 @@ services:
       # - GOOGLE_CLIENT_SECRET=your_client_secret
       # - GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
     volumes:
-      - ./uploads:/usr/src/app/uploads
-      - whatsapp-auth:/usr/src/app/.wwebjs_auth
+      - ./uploads:/app/uploads
+      - whatsapp-auth:/app/.wwebjs_auth
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 350M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   mongo:
-    image: mongo:latest
+    image: mongo:6-alpine
     container_name: mongo-whatsapp
     restart: unless-stopped
+    command: mongod --storageEngine=wiredTiger --wiredTigerCacheSizeGB=0.25
     ports:
       - "27017:27017"
     volumes:
       - mongodb-data:/data/db
     environment:
-      # If you need authentication, uncomment and set these
-      # - MONGO_INITDB_ROOT_USERNAME=root
-      # - MONGO_INITDB_ROOT_PASSWORD=example_password
+      - MONGO_INITDB_DATABASE=whatsapp-scheduler
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+          cpus: '0.3'
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "'db.adminCommand(\"ping\")'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
 volumes:
   mongodb-data:

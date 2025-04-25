@@ -1,36 +1,54 @@
-# Use an official Node.js runtime as a parent image
-FROM node:18-slim
+# Build stage
+FROM node:18-alpine AS build
 
-# Install Chromium and its dependencies
-RUN apt-get update \
-    && apt-get install -y chromium fonts-liberation libasound2 \
-    libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 \
-    libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 \
-    libxdamage1 libxfixes3 libxrandr2 xdg-utils --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
-
-# Tell whatsapp-web.js / Puppeteer where to find the browser
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    NODE_ENV=production \
-    PORT=3000
-
-# Create app directory
-WORKDIR /usr/src/app
-
-# Copy package.json and package-lock.json
+# Set up workdir and copy package files
+WORKDIR /app
 COPY package*.json ./
 
-# Install app dependencies
-RUN npm install --production
+# Install dependencies for build
+RUN npm ci --omit=dev
 
-# Copy app source
+# Copy source files
 COPY . .
 
-# Create uploads directory for media files
+# Final production stage
+FROM node:18-alpine
+
+# Install Chromium and minimal dependencies
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    # Use nano instead of full-size editors
+    nano \
+    # Add tzdata for timezone handling
+    tzdata
+
+# Set up browser environment with memory optimizations
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    NODE_ENV=production \
+    PORT=3000 \
+    # Browser flags for low resource usage
+    PUPPETEER_ARGS="--disable-dev-shm-usage --disable-gpu --disable-software-rasterizer --disable-extensions --no-sandbox --disable-setuid-sandbox --no-zygote --single-process --disable-features=site-per-process"
+
+# Create workdir and uploads directory
+WORKDIR /app
 RUN mkdir -p uploads
+
+# Copy from build stage
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app .
+
+# Add support for health checks
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
 
 # Expose port
 EXPOSE 3000
 
-# Start the app
-CMD ["node", "sender.js"]
+# Start the app with memory limit flag
+CMD ["node", "--max-old-space-size=256", "sender.js"]
