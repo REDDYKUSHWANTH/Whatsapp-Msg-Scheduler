@@ -109,4 +109,10 @@ You should see:
 
 ---
 
+![Signup Screenshot](/screenshots/signup.png)
+![Login Screenshot](/screenshots/login.png)
+![Index Screenshot](/screenshots/index.png)
+![MyTasks Screenshot](/screenshots/mytasks.png)
+![Receipts Screenshot](/screenshots/receipts.png)
+
 © 2024 WhatsApp Web Sender Demo

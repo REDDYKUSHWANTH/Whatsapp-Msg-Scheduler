@@ -122,8 +122,11 @@ const client = new Client({
   puppeteer: {
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    executablePath: "/usr/bin/google-chrome-stable",
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
   },
+  authStrategy: new LocalAuth({
+    clientId: "whatsapp-scheduler",
+  }),
 });
 
 let currentQR = null;
