@@ -49,32 +49,34 @@ SMTP_PASS=your-smtp-password
 EMAIL_FROM=you@example.com
 ```
 
-## Installation
+## Getting Started
+
+### 📁 Setup
 
 ```bash
-# Clone the repo
-git clone <your-repo-url>
-cd <repo-directory>
+# 1. Clone the repository
+git clone https://github.com/your-username/whatsapp-msg-scheduler.git
+cd whatsapp-msg-scheduler
 
-# Install dependencies
+# 2. Configure environment
+cp .env.example .env
+# ➤ Fill in your MongoDB URI, session secret, OAuth & SMTP credentials in .env
+ MONGODB_URI=mongodb://localhost:27017/whatsapp_scheduler
+SESSION_SECRET=your-secret
+
+# Google OAuth2 (optional)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+
+# 3. Install dependencies
 npm install
-```
 
-Ensure MongoDB is running locally (or update `MONGODB_URI` to your cluster).
-
-## Running the Service
-
-```bash
-# Start the server (http://localhost:3000)
+# 4. Start the server
 npm start
 ```
 
-You should see:
-
-```
-✅ Connected to MongoDB
-✅ Server running at http://localhost:3000/signup.html
-```
+Ensure MongoDB is running locally (or update `MONGODB_URI` in your `.env` to your cluster).
 
 ## Web UI
 
